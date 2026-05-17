@@ -1,7 +1,7 @@
 import os
 from aiogram import Bot, Dispatcher
 from aiogram.types import Message
-from aiogram.filters import CommandStart
+from aiogram.filters import CommandStart,Command
 from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
 from aiohttp import web
 
@@ -13,7 +13,10 @@ dp = Dispatcher()
 @dp.message(CommandStart())
 async def command_start_handler(message: Message) -> None:
     await message.answer(f"Привет! Бот успешно запущен на Render 🚀")
-
+# Обработчик команды /hi
+@dp.message(Command("hi"))
+async def command_start_handler(message: Message) -> None:
+ await message.answer(f"это команда привет 🚀")
 # Настройка вебхука при старте сервера
 async def on_startup(bot: Bot) -> None:
     BASE_WEBHOOK_URL = os.getenv("RENDER_EXTERNAL_URL")
