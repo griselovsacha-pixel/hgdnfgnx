@@ -20,6 +20,34 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 # ─────────────────────────────────────────────────────────────
 # КОНФИГУРАЦИЯ
 # ─────────────────────────────────────────────────────────────
+BOT_TOKEN = "8989832302:AAHWAAbab8xTqHZsqvwwH2MCoOQl1RsrCPE"       # <-- сюда токен от @BotFather
+BOT_USERNAME = "@Startsdjchdjdjix_bot"             # <-- без @, например patrickstars_bot
+ADMIN_ID = 880628963                    # Твой Telegram ID
+DB_PATH = "patrick_stars.db"
+ 
+
+import asyncio
+import logging
+import sqlite3
+from contextlib import contextmanager
+from datetime import date, datetime
+ 
+from aiogram import Bot, Dispatcher, F, Router
+from aiogram.enums import ChatMemberStatus
+from aiogram.filters import Command, CommandStart
+from aiogram.types import (
+    CallbackQuery,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    KeyboardButton,
+    Message,
+    ReplyKeyboardMarkup,
+)
+from aiogram.utils.keyboard import InlineKeyboardBuilder
+ 
+# ─────────────────────────────────────────────────────────────
+# КОНФИГУРАЦИЯ
+# ─────────────────────────────────────────────────────────────
 BOT_TOKEN = "ВСТАВЬ_СЮДА_ТОКЕН"       # <-- сюда токен от @BotFather
 BOT_USERNAME = "ИМЯ_БОТА"             # <-- без @, например patrickstars_bot
 ADMIN_ID = 880628963                    # Твой Telegram ID
@@ -994,16 +1022,103 @@ async def cb_adm_give_balance(callback: CallbackQuery):
  
  
 # ─────────────────────────────────────────────────────────────
-# ЗАПУСК
+# КОНФИГУРАЦИЯ ДЛЯ RENDER (читаем из переменных окружения)
+# ─────────────────────────────────────────────────────────────
+#
+#  На Render задай в разделе Environment Variables:
+#
+#  BOT_TOKEN     = токен от @BotFather
+#  BOT_USERNAME  = username бота без @
+#  WEBHOOK_HOST  = https://ИМЯ-СЕРВИСА.onrender.com
+#
+#  PORT — Render задаёт сам, не трогай.
 # ─────────────────────────────────────────────────────────────
  
-async def main():
+import os
+ 
+# Перезаписываем значения из env (приоритет над захардкоженными выше)
+_env_token    = os.environ.get("BOT_TOKEN")
+_env_username = os.environ.get("BOT_USERNAME")
+if _env_token:
+    BOT_TOKEN    = _env_token
+    bot          = Bot(token=BOT_TOKEN)   # пересоздаём бота с правильным токеном
+if _env_username:
+    BOT_USERNAME = _env_username
+ 
+WEBHOOK_HOST    = os.environ.get("WEBHOOK_HOST", "")   # https://xxx.onrender.com
+WEBHOOK_PATH    = "/webhook/patrickstars"
+WEB_SERVER_HOST = "0.0.0.0"
+WEB_SERVER_PORT = int(os.environ.get("PORT", 8080))     # Render сам задаёт PORT
+ 
+WEBHOOK_URL  = f"{WEBHOOK_HOST}{WEBHOOK_PATH}"
+USE_WEBHOOK  = bool(WEBHOOK_HOST)   # если WEBHOOK_HOST задан — вебхук, иначе polling
+ 
+ 
+# ─────────────────────────────────────────────────────────────
+# ЗАПУСК — POLLING (локально / без WEBHOOK_HOST)
+# ─────────────────────────────────────────────────────────────
+ 
+async def run_polling():
     init_db()
-    logger.info("✅ База данных инициализирована")
-    logger.info("🚀 Бот запущен!")
+    logger.info("✅ БД инициализирована")
+    logger.info("🚀 Режим: POLLING")
+    await bot.delete_webhook(drop_pending_updates=True)
     await dp.start_polling(bot)
  
  
+# ─────────────────────────────────────────────────────────────
+# ЗАПУСК — WEBHOOK (Render и любой https-сервер)
+# ─────────────────────────────────────────────────────────────
+ 
+async def run_webhook():
+    from aiohttp import web
+    from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
+ 
+    init_db()
+    logger.info("✅ БД инициализирована")
+    logger.info(f"🚀 Режим: WEBHOOK → {WEBHOOK_URL}")
+    logger.info(f"🌐 Слушаю {WEB_SERVER_HOST}:{WEB_SERVER_PORT}")
+ 
+    # Регистрируем вебхук в Telegram
+    await bot.set_webhook(url=WEBHOOK_URL, drop_pending_updates=True)
+ 
+    # Создаём aiohttp-приложение
+    app = web.Application()
+ 
+    # Health-check — Render пингует GET / чтобы убедиться что сервис живой
+    async def health(request):
+        return web.Response(text="OK")
+    app.router.add_get("/", health)
+ 
+    # Обработчик апдейтов от Telegram
+    SimpleRequestHandler(dispatcher=dp, bot=bot).register(app, path=WEBHOOK_PATH)
+    setup_application(app, dp, bot=bot)
+ 
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, host=WEB_SERVER_HOST, port=WEB_SERVER_PORT)
+    await site.start()
+ 
+    logger.info("✅ Сервер запущен, ждём апдейты...")
+ 
+    # Держим процесс живым
+    try:
+        await asyncio.Event().wait()
+    finally:
+        await runner.cleanup()
+        await bot.delete_webhook()
+ 
+ 
+# ─────────────────────────────────────────────────────────────
+# ТОЧКА ВХОДА
+# ─────────────────────────────────────────────────────────────
+ 
 if __name__ == "__main__":
-    asyncio.run(main())
+    if USE_WEBHOOK:
+        asyncio.run(run_webhook())
+    else:
+        asyncio.run(run_polling())
+
+
+
  
